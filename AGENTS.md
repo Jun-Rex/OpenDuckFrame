@@ -45,11 +45,11 @@ Keep performance and quality claims limited to the hardware, inputs and settings
 
 ## Git collaboration
 
-Fetch and inspect the current target branch before development. Use the remote default branch when none is specified.
-Protect dirty files and concurrent work, and develop on a task branch based on the current remote baseline.
+All project changes first enter the active release branch through a PR. Use the release branch specified for the current task; otherwise use `release/v<planned-version>` for the current unreleased version. Check the version/build policy in [RELEASING.md](RELEASING.md) and the current project version before choosing it. Do not default a development PR to `main` or reuse an obsolete release branch.
+Fetch and inspect the latest remote refs before development. If the matching release branch does not exist, create and push it from the latest `origin/main`, then base the task branch on that release baseline. If it already exists, base the task branch on its latest remote commit. Protect dirty files and concurrent work throughout.
 Coordinate changes across app, capture, shared interfaces, resources and build definitions.
-Stage only task files, inspect the exact diff, and refresh the remote baseline before opening a PR.
-Human review and merge are the default. Merge only when the current task explicitly authorizes it.
+Stage only task files, inspect the exact diff, and refresh the remote release baseline before opening a PR whose base is the active release branch.
+Human review and merge are the default. Merge only when the current task explicitly authorizes it; an unqualified merge request targets the current release PR. Promote a release branch to `main` through a separate PR only when the user explicitly requests that promotion. Creating or merging a release branch does not publish packages, update the website, or authorize those actions.
 Keep generated projects, app bundles, media fixtures, credentials and local logs out of commits.
 Keep personal paths and machine-specific policies outside this shared repository.
 

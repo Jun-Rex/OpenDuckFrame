@@ -28,6 +28,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// frames retain the caller's dimensions; only intermediate inference is smaller.
 /// File providers keep the strict prepareWidth:height:frames:error: entry point.
 - (BOOL)prepareLiveWidth:(int)width height:(int)height frames:(NSInteger)frames error:(NSError *_Nullable *_Nullable)error;
+/// Optional live inference budget: 720 caps pixels at 1280*720 and edges at 1280;
+/// 0 uses API limits. Preserve aspect ratio, including portrait sources.
+- (BOOL)prepareLiveWidth:(int)width height:(int)height frames:(NSInteger)frames processingPreset:(int)preset error:(NSError *_Nullable *_Nullable)error;
 
 /// Previous frame is A and source frame is B. Outputs follow `phases` and each owns a +1 buffer.
 /// The completion runs once. Source buffers must stay alive until then.
