@@ -822,7 +822,7 @@ final class WindowCaptureSource: NSObject, SCStreamOutput, SCStreamDelegate, SCC
         streamBinding.retire()
         // Retired callbacks no longer reach the gate; release its full-frame
         // snapshot after any in-flight evaluation on the capture queue.
-        queue.async { [contentFrameGate] in contentFrameGate.releaseSnapshot() }
+        queue.async { [weak self] in self?.contentFrameGate.releaseSnapshot() }
         geometryLock.lock(); frameGeometryReceipt = nil; geometryLock.unlock()
         stream = nil
         running = false
@@ -1205,7 +1205,7 @@ final class WindowCaptureSource: NSObject, SCStreamOutput, SCStreamDelegate, SCC
             }
             if status == .blank { blankCount += 1 }
             if status == .suspended { suspendedCount += 1 }
-            if status == .stopped { stoppedCount += 1 }
+            if status == .stopped { stoppedCount += 1; contentFrameGate.releaseSnapshot() }
             onDiagnostic?("status \(status.rawValue) blank \(blankCount) suspended \(suspendedCount)")
             onNote?(2)
             return
