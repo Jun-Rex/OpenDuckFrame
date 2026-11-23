@@ -9,6 +9,9 @@ static void require(bool condition, const char *message) {
 
 int main() {
     using namespace sp;
+    require(presentationSelectionGuardNs(true, 1000000) == 3000000, "Apple low latency needs encoding room");
+    require(presentationSelectionGuardNs(false, 1000000) == 1000000, "Other presentation modes keep their guard");
+    require(presentationSelectionGuardNs(true, 4000000) == 4000000, "Larger explicit guards must survive");
     std::vector<DisplayQueueFrame> pending;
     const int64_t tick = 8333333;
     auto add = [&](int phase, int64_t target, uint64_t id) {

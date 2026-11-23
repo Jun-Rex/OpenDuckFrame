@@ -31,19 +31,25 @@ import CoreVideo
     }
     static func benchmark() {
         for format in [kCVPixelFormatType_32BGRA, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange] {
+          for mode in ["sample-change", "exact-repeat", "unsampled-change"] {
             let gate = ContentFrameGate(), image = buffer(2560, 1440, format, 32)
-            let point = ContentFrameGate.sampleCoordinates(width: 2560, height: 1440)[0]
+            let points = ContentFrameGate.sampleCoordinates(width: 2560, height: 1440)
+            let point = mode == "sample-change" ? points[0] : (x: 0, y: 0)
+            precondition(mode != "unsampled-change" || !points.contains { $0.x == 0 && $0.y == 0 })
             for i in 0..<600 {
                 CVPixelBufferLockBaseAddress(image, [])
                 let planar = CVPixelBufferIsPlanar(image)
                 let base = (planar ? CVPixelBufferGetBaseAddressOfPlane(image, 0) : CVPixelBufferGetBaseAddress(image))!.assumingMemoryBound(to: UInt8.self)
                 let stride = planar ? CVPixelBufferGetBytesPerRowOfPlane(image, 0) : CVPixelBufferGetBytesPerRow(image)
-                base[point.y * stride + point.x * (planar ? 1 : 4)] = UInt8((i % 2) * 8 + 32)
+                if mode != "exact-repeat" {
+                    base[point.y * stride + point.x * (planar ? 1 : 4)] = UInt8((i % 2) * (mode == "sample-change" ? 8 : 1) + 32)
+                }
                 CVPixelBufferUnlockBaseAddress(image, [])
                 _ = gate.evaluate(buffer: image, generation: 1, hostNs: Int64(i) * 8_333_333 + 1)
             }
             let d = gate.diagnostics(nowNs: 5_000_000_000)
-            print("A7 2560x1440 format=\(format == kCVPixelFormatType_32BGRA ? "BGRA" : "420v") samples=600 measuredLast=256 p95_ms=\(d["contentFingerprintP95Ms"]!) includes=lock,sampling,comparison,unlock,gate_diagnostics_bookkeeping actualSCK=false")
+            print("A7 2560x1440 format=\(format == kCVPixelFormatType_32BGRA ? "BGRA" : "420v") mode=\(mode) samples=600 measuredLast=256 p95_ms=\(d["contentFingerprintP95Ms"]!) includes=lock,sampling,conditional_full_pixel_comparison,snapshot_update,unlock,gate_diagnostics_bookkeeping actualSCK=false")
+          }
         }
     }
     static func main() {
@@ -77,7 +83,7 @@ import CoreVideo
             let qbase = (CVPixelBufferIsPlanar(quant) ? CVPixelBufferGetBaseAddressOfPlane(quant, 0) : CVPixelBufferGetBaseAddress(quant))!.assumingMemoryBound(to: UInt8.self)
             qbase[point.y * stride + point.x * (CVPixelBufferIsPlanar(quant) ? 1 : 4)] = 35
             CVPixelBufferUnlockBaseAddress(quant, [])
-            precondition(one.evaluate(buffer:quant,generation:1,hostNs:5) == .duplicate, "two-bit quantization")
+            precondition(one.evaluate(buffer:quant,generation:1,hostNs:5) == .accepted, "Sub-quantization changes must survive")
             precondition(one.evaluate(buffer:c,generation:1,hostNs:10) == .accepted, "compare with previous accepted, not prior callback")
             if format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange {
                 let chromaOnly = buffer(160, 90, format, 32)
@@ -93,6 +99,22 @@ import CoreVideo
             precondition((stale["contentAccepted"] as? Int) == 0, "old generation diagnostics hidden")
             precondition(one.evaluate(buffer:buffer(162,90,format,32),generation:1,hostNs:20) == .accepted, "size resets")
             precondition(one.evaluate(buffer:c,generation:2,hostNs:30) == .accepted, "generation resets")
+            // A small moving detail between sample points must not disappear.
+            let detail = ContentFrameGate(), original = buffer(256,144,format,32), moved = buffer(256,144,format,32)
+            let sampled = Set(ContentFrameGate.sampleCoordinates(width:256,height:144).map { $0.y*256+$0.x })
+            let missing = (0..<(256*144)).first { !sampled.contains($0) }!
+            precondition(detail.evaluate(buffer:original,generation:1,hostNs:1) == .accepted)
+            CVPixelBufferLockBaseAddress(moved, [])
+            let detailBase = (CVPixelBufferIsPlanar(moved) ? CVPixelBufferGetBaseAddressOfPlane(moved,0) : CVPixelBufferGetBaseAddress(moved))!.assumingMemoryBound(to:UInt8.self)
+            let detailStride = CVPixelBufferIsPlanar(moved) ? CVPixelBufferGetBytesPerRowOfPlane(moved,0) : CVPixelBufferGetBytesPerRow(moved)
+            detailBase[(missing/256)*detailStride+(missing%256)*(CVPixelBufferIsPlanar(moved) ? 1 : 4)] = 33
+            CVPixelBufferUnlockBaseAddress(moved, [])
+            precondition(detail.evaluate(buffer:moved,generation:1,hostNs:40_000_001) == .accepted, "Unsampled one-level changes must survive")
+            precondition(detail.evaluate(buffer:moved,generation:1,hostNs:80_000_001) == .duplicate, "Identical full pixels still deduplicate")
+            // Stop releases the full-frame snapshot; nothing is left to match against.
+            detail.releaseSnapshot()
+            precondition(detail.evaluate(buffer:moved,generation:1,hostNs:90_000_001) == .accepted, "Released snapshot cannot suppress a frame")
+            precondition(detail.evaluate(buffer:moved,generation:1,hostNs:100_000_001) == .duplicate, "Snapshot rebuilds after release")
         }
         let changedFormat = ContentFrameGate()
         precondition(changedFormat.evaluate(buffer:buffer(160,90,kCVPixelFormatType_32BGRA,32),generation:1,hostNs:1) == .accepted)
@@ -105,6 +127,6 @@ import CoreVideo
                 committed:true,interpolation:true,canObserve:true,outputObservable:true,chinese:chinese)
             precondition(label.contains(chinese ? "内容≈ 30.0" : "Content≈ 30.0"))
         }
-        print("ContentFrameGate: 24/30/120, keepalive, point, quantization, chroma, generation, size, HUD, BGRA and 420v pass")
+        print("ContentFrameGate: 24/30/120, keepalive, point, quantization, chroma, generation, size, snapshot release, HUD, BGRA and 420v pass")
     }
 }

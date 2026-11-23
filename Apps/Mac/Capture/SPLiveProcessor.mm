@@ -718,6 +718,7 @@ static NSSize SPLiveSRInputSizeForRequest(int width, int height, SPLivePlanReque
     copy.qualityID = self.qualityID ?: @"";
     copy.rifeStreamEnabled = self.rifeStreamEnabled;
     copy.automaticVideoCadence = self.automaticVideoCadence;
+    copy.lowLatencyProcessingPreset = self.lowLatencyProcessingPreset;
     copy.captureSourceKind = self.captureSourceKind;
     return copy;
 }
@@ -1785,7 +1786,9 @@ static NSDictionary *SPAirFusedRenderExport(const SPAirFusedRenderPtr &record) {
         [self resetAirDisplayPolicyLocked];
     }
 }
-- (int64_t)selectionGuardNs { return _selectionGuardNs.load(); }
+- (int64_t)selectionGuardNs {
+    return sp::presentationSelectionGuardNs(_lowLatencyPresentationEnabled.load(), _selectionGuardNs.load());
+}
 
 - (void)setPresentedVideoReadbackEnabled:(BOOL)enabled {
 #if ODF_AIR_FUSED_RIFE_PRESENT_DIAGNOSTIC
@@ -4698,6 +4701,7 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
         @"lowLatencyProcessingWidth": @(_lowLatency ? _lowLatency.width : 0),
         @"lowLatencyProcessingHeight": @(_lowLatency ? _lowLatency.height : 0),
         @"lowLatencyPreparationFallbackReason": _lowLatency.preparationFallbackReason ?: @"",
+        @"lowLatencyProcessingPreset": @(_request.lowLatencyProcessingPreset),
         @"lowLatencyProcessingOrder": [self requestUsesLowPrescale:_request width:_width height:_height] ? @"lanczos-before-low-latency" : @"interpolation-before-scale",
         @"estimatedContentFPS": @((double)_windowChanged / seconds),
         @"r7ContentChange": @{ @"host": @(_r7ContentChangedHost),
@@ -5458,7 +5462,7 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
             NSInteger frames = (copy.rateKind == SPLiveRateFixedFPS || copy.multiplier >= 4) ? 2 : 1;
             lowLatency = [[SPLowLatencyEngine alloc] init];
             BOOL pre=[self requestUsesLowPrescale:copy width:width height:height];
-            if (![lowLatency prepareLiveWidth:pre ? copy.outputWidth : width height:pre ? copy.outputHeight : height frames:frames error:&error]) lowLatency = nil;
+            if (![lowLatency prepareLiveWidth:pre ? copy.outputWidth : width height:pre ? copy.outputHeight : height frames:frames processingPreset:copy.lowLatencyProcessingPreset error:&error]) lowLatency = nil;
             else copy.modelID = lowLatency.modelID;
         } else if (copy.interpolationEnabled && [engine isEqualToString:@"rife.metal"]) {
             if (!copy.modelID.length) copy.modelID = @"rife-v4.25";
