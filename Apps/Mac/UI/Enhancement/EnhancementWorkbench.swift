@@ -4605,7 +4605,12 @@ final class EnhancementWorkbenchController: NSWindowController, NSWindowDelegate
     }
 
     private func applyModeVisibility() {
-        videoCadenceRow?.isHidden = profile.interpolationEngineID != "apple.lowlatency" || profile.sourceKind == "file"
+        let liveLowLatency = profile.interpolationEngineID == "apple.lowlatency" && profile.sourceKind != "file"
+        videoCadenceRow?.isHidden = !liveLowLatency
+        lowLatencySizeRow?.isHidden = !liveLowLatency
+        // Turning interpolation on goes through controlChanged, not reloadQualityItems.
+        videoCadencePopup.isEnabled = profile.interpolationEnabled
+        lowLatencySizePopup.isEnabled = profile.interpolationEnabled
         captureCapPopup.isEnabled = !profile.usesAutomaticVideoCadence
         captureCapPopup.selectItem(at: profile.usesAutomaticVideoCadence ? 2 : (["auto": 0, "30": 1, "60": 2][profile.captureLimit] ?? 0))
         srInputRow?.isHidden = profile.sourceKind == "file"
