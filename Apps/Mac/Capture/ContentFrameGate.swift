@@ -33,6 +33,13 @@ final class ContentFrameGate {
         return points
     }
 
+    /// Frees the owned pixel snapshot once its stream has retired. Counters stay
+    /// for diagnostics; the next frame has nothing to match and is accepted.
+    func releaseSnapshot() {
+        previous.removeAll()
+        previousPixels = []
+    }
+
     func evaluate(buffer: CVPixelBuffer, generation nextGeneration: UInt64, hostNs: Int64) -> Decision {
         let start = mach_absolute_time()
         defer {

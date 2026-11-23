@@ -111,6 +111,10 @@ import CoreVideo
             CVPixelBufferUnlockBaseAddress(moved, [])
             precondition(detail.evaluate(buffer:moved,generation:1,hostNs:40_000_001) == .accepted, "Unsampled one-level changes must survive")
             precondition(detail.evaluate(buffer:moved,generation:1,hostNs:80_000_001) == .duplicate, "Identical full pixels still deduplicate")
+            // Stop releases the full-frame snapshot; nothing is left to match against.
+            detail.releaseSnapshot()
+            precondition(detail.evaluate(buffer:moved,generation:1,hostNs:90_000_001) == .accepted, "Released snapshot cannot suppress a frame")
+            precondition(detail.evaluate(buffer:moved,generation:1,hostNs:100_000_001) == .duplicate, "Snapshot rebuilds after release")
         }
         let changedFormat = ContentFrameGate()
         precondition(changedFormat.evaluate(buffer:buffer(160,90,kCVPixelFormatType_32BGRA,32),generation:1,hostNs:1) == .accepted)
@@ -123,6 +127,6 @@ import CoreVideo
                 committed:true,interpolation:true,canObserve:true,outputObservable:true,chinese:chinese)
             precondition(label.contains(chinese ? "内容≈ 30.0" : "Content≈ 30.0"))
         }
-        print("ContentFrameGate: 24/30/120, keepalive, point, quantization, chroma, generation, size, HUD, BGRA and 420v pass")
+        print("ContentFrameGate: 24/30/120, keepalive, point, quantization, chroma, generation, size, snapshot release, HUD, BGRA and 420v pass")
     }
 }

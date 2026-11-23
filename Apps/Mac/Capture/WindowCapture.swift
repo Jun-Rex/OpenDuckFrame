@@ -820,6 +820,9 @@ final class WindowCaptureSource: NSObject, SCStreamOutput, SCStreamDelegate, SCC
         }
 #endif
         streamBinding.retire()
+        // Retired callbacks no longer reach the gate; release its full-frame
+        // snapshot after any in-flight evaluation on the capture queue.
+        queue.async { [contentFrameGate] in contentFrameGate.releaseSnapshot() }
         geometryLock.lock(); frameGeometryReceipt = nil; geometryLock.unlock()
         stream = nil
         running = false
@@ -1140,7 +1143,7 @@ final class WindowCaptureSource: NSObject, SCStreamOutput, SCStreamDelegate, SCC
             }
             self.running = false
             self.stopResizeMonitoring(note: "stream delegate stopped")
-            self.queue.async { self.stoppedCount += 1 }
+            self.queue.async { self.stoppedCount += 1; self.contentFrameGate.releaseSnapshot() }
             self.onDiagnostic?("stream stopped: \(error.localizedDescription)")
             self.onStatus?("来源中断：\(error.localizedDescription)", true)
             self.onNote?(2)
