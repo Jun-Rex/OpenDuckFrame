@@ -136,3 +136,32 @@ fragment float4 spAirPresentLanczos(SPPresentVertex in [[stage_in]],
     float3 rgb = sumY != 0.0 ? vertical / sumY : float3(0);
     return float4(clamp(rgb, 0.0, 1.0), 1.0);
 }
+
+// One 16x16 threadgroup per tile. A tile whose two submitted source pictures
+// are bit-identical takes the current source pixels; any other tile keeps the
+// generated frame. See SPStaticTileRestorer.
+kernel void spRestoreStaticTiles(texture2d<float, access::read> previous [[texture(0)]],
+                                 texture2d<float, access::read> current [[texture(1)]],
+                                 texture2d<float, access::read> generated [[texture(2)]],
+                                 texture2d<float, access::write> output [[texture(3)]],
+                                 device atomic_uint *staticTiles [[buffer(0)]],
+                                 uint2 gid [[thread_position_in_grid]],
+                                 uint2 tid [[thread_position_in_threadgroup]],
+                                 uint simdIndex [[simdgroup_index_in_threadgroup]],
+                                 uint simdCount [[simdgroups_per_threadgroup]]) {
+    threadgroup bool changedBySimd[32];
+    const bool inside = gid.x < output.get_width() && gid.y < output.get_height();
+    float4 now = float4(0);
+    bool differs = false;
+    if (inside) {
+        now = current.read(gid);
+        differs = any(previous.read(gid) != now);
+    }
+    const bool simdChanged = simd_any(differs);
+    if (simd_is_first()) changedBySimd[simdIndex] = simdChanged;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    bool changed = false;
+    for (uint i = 0; i < simdCount; ++i) changed = changed || changedBySimd[i];
+    if (inside) output.write(changed ? generated.read(gid) : now, gid);
+    if (!changed && tid.x == 0 && tid.y == 0) atomic_fetch_add_explicit(staticTiles, 1u, memory_order_relaxed);
+}
