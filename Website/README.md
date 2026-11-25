@@ -3,7 +3,7 @@
 OpenDuckFrame（开源小鸭）的静态产品页，介绍 Mac 实时补帧、超分和本地播放。
 
 产品源码、构建说明、隐私政策和反馈入口：
-[Jun-bao/OpenDuckFrame](https://github.com/Jun-bao/OpenDuckFrame)。
+[Jun-Rex/OpenDuckFrame](https://github.com/Jun-Rex/OpenDuckFrame)。
 
 ## 本地预览
 
