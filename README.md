@@ -37,8 +37,8 @@ and English. Experimental backends and constraints are described in [the feature
 
 ## Get started
 
-Download the [Mac app](https://github.com/Jun-bao/OpenDuckFrame/releases/latest/download/OpenDuckFrame.dmg)
-or [browse releases](https://github.com/Jun-bao/OpenDuckFrame/releases).
+Download the [Mac app](https://github.com/Jun-Rex/OpenDuckFrame/releases/latest/download/OpenDuckFrame.dmg)
+or [browse releases](https://github.com/Jun-Rex/OpenDuckFrame/releases).
 The community download is ad-hoc signed and **not Apple notarized**, so macOS may
 block its first launch. Only allow it in System Settings → Privacy & Security if
 you trust the source. Updates may require granting Screen Recording or
@@ -104,7 +104,7 @@ and these build tools:
 
 ```sh
 brew install xcodegen meson ninja cmake pkg-config
-git clone https://github.com/Jun-bao/OpenDuckFrame.git
+git clone https://github.com/Jun-Rex/OpenDuckFrame.git
 cd OpenDuckFrame
 ./Apps/Mac/Scripts/build.sh Debug
 open .build/Build/Products/Debug/OpenDuckFrame.app
@@ -148,8 +148,8 @@ Generated projects, apps, dependency builds, private keys, local logs and test m
 
 ## Community and contributing
 
-Use [Issues](https://github.com/Jun-bao/OpenDuckFrame/issues) for bugs and
-feature requests, and [Discussions](https://github.com/Jun-bao/OpenDuckFrame/discussions)
+Use [Issues](https://github.com/Jun-Rex/OpenDuckFrame/issues) for bugs and
+feature requests, and [Discussions](https://github.com/Jun-Rex/OpenDuckFrame/discussions)
 for questions and setup sharing. Include app and macOS versions, Mac model, source
 resolution, engine and observed output rate. Review logs and screenshots for private content before sharing.
 

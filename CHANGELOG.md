@@ -2,6 +2,22 @@
 
 All notable public releases will be documented here.
 
+## 0.8.0 — 2026-11-25
+
+- Keep the captured pixels in unchanged 16×16 tiles of live generated frames,
+  so static text and controls around a video stay sharp (#37). Detail next to
+  motion can still soften; ODF-VFI window optimization is not covered.
+- Add an optional 720p inference budget for live Apple low latency, preserving
+  output geometry and saved choices.
+- Confirm duplicate frames against full pixels so small motion is kept, and
+  reserve at least 3 ms before Apple low-latency presentation deadlines.
+- Label source-only stop as Stop Capture, enable Content timing and
+  Interpolation detail when interpolation is turned on, and release the
+  duplicate-check snapshot when capture stops.
+- Move the update feed to `jun-rex.github.io` after the repository transfer.
+  Installed 0.6.2 and earlier builds still check the retired address and need
+  one manual download.
+
 ## 0.5.0 — 2026-11-14
 
 - Offer ODF-VFI (default), Apple low-latency interpolation and Apple FRC in the

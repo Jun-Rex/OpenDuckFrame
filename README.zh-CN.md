@@ -28,8 +28,8 @@ OpenDuckFrame 是一款原生 Mac 画质增强应用。浏览器视频、游戏�
 
 ## 开始使用
 
-下载 [Mac 安装包](https://github.com/Jun-bao/OpenDuckFrame/releases/latest/download/OpenDuckFrame.dmg)，
-或查看 [版本列表](https://github.com/Jun-bao/OpenDuckFrame/releases)。
+下载 [Mac 安装包](https://github.com/Jun-Rex/OpenDuckFrame/releases/latest/download/OpenDuckFrame.dmg)，
+或查看 [版本列表](https://github.com/Jun-Rex/OpenDuckFrame/releases)。
 社区安装包使用临时签名，**未经过 Apple 公证**，首次打开可能被 macOS 拦截。
 确认信任来源后，由你在系统设置 → 隐私与安全性中决定是否允许打开。
 由于社区版使用临时签名，升级后可能需要重新授予屏幕录制或辅助功能权限。
@@ -76,7 +76,7 @@ Fast X2 窗口优化按 GPU 能力、内存上限和准备时的实测耗时判�
 
 ```sh
 brew install xcodegen meson ninja cmake pkg-config
-git clone https://github.com/Jun-bao/OpenDuckFrame.git
+git clone https://github.com/Jun-Rex/OpenDuckFrame.git
 cd OpenDuckFrame
 ./Apps/Mac/Scripts/build.sh Debug
 open .build/Build/Products/Debug/OpenDuckFrame.app
@@ -116,8 +116,8 @@ docs/              上手、功能与项目说明
 
 ## 交流与参与
 
-故障和功能建议请提交 [Issue](https://github.com/Jun-bao/OpenDuckFrame/issues)，
-使用问题和配置分享可前往 [Discussions](https://github.com/Jun-bao/OpenDuckFrame/discussions)。
+故障和功能建议请提交 [Issue](https://github.com/Jun-Rex/OpenDuckFrame/issues)，
+使用问题和配置分享可前往 [Discussions](https://github.com/Jun-Rex/OpenDuckFrame/discussions)。
 反馈时附上应用版本、macOS 版本、Mac 型号、来源分辨率、引擎和实际输出帧率；不要直接上传私人画面或未经检查的诊断日志。
 
 开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题的私下反馈方式见 [SECURITY.md](SECURITY.md)，

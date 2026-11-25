@@ -1,0 +1,16 @@
+<h2>OpenDuckFrame 0.8.0</h2>
+<ul>
+  <li>实时补帧时，窗口里没有变化的部分（文字、按钮、评论区）直接使用原始画面，在浏览器里看视频时不再整页一帧清楚一帧糊。紧挨着运动画面的细节仍可能略软；ODF-VFI 的窗口优化模式暂不包括。</li>
+  <li>Apple 低延迟实时插帧的“插帧画质”新增“720p · 流畅优先”，减轻 GPU 负担；输出尺寸和已保存的设置不变。</li>
+  <li>修复画面里很小的变化可能被当成重复帧而丢掉的问题；Apple 低延迟为每帧上屏预留更多时间，减少已算好的帧被丢弃。</li>
+  <li>只预览原画面时，按钮显示为“停止采集”；打开插帧后，“内容节奏”和“插帧画质”会立即可选；停止采集后及时释放占用的内存。</li>
+  <li>更新检查改用仓库迁移后的新地址。0.6.2 及更早的版本收不到这次的自动更新提示，请手动下载一次安装包覆盖安装。</li>
+</ul>
+<ul>
+  <li>During live interpolation, parts of a window that do not change, such as text, buttons and comments, keep the captured pixels, so browser pages around a video no longer alternate between sharp and soft. Detail right next to motion can still soften; ODF-VFI window optimization is not covered yet.</li>
+  <li>Apple low-latency live interpolation adds “720p · smoother playback” under Interpolation detail to reduce GPU load. Output size and saved choices are unchanged.</li>
+  <li>Small picture changes are no longer mistaken for duplicate frames. Apple low latency reserves more time before each frame reaches the screen, so fewer computed frames are dropped.</li>
+  <li>Source-only preview now offers “Stop Capture”; turning interpolation on immediately enables Content timing and Interpolation detail; stopping capture releases its frame memory.</li>
+  <li>Update checks use the repository's new address. Versions 0.6.2 and earlier will not be offered this update automatically; download the installer once and replace the app.</li>
+</ul>
+<p>实际画质和持续帧率仍取决于设备、片源与设置。此社区版使用临时签名，未经过 Apple 公证，升级后可能需要重新授予屏幕录制或辅助功能权限。 Actual quality and sustained frame rate depend on the device, source and settings. This ad-hoc-signed community build is not Apple notarized; macOS may ask for Screen Recording or Accessibility permission again after an upgrade.</p>
