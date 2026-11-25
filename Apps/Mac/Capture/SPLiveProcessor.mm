@@ -6475,8 +6475,7 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
 }
 
 // The source pair as submitted to the engine, as +1 BGRA buffers, fetched
-// only for a generated frame of the same size: the fused window-optimization
-// output (reduced processing size) costs no conversion. BGRA captures are
+// only for a generated frame of the same size. BGRA captures are
 // retained, not copied; other formats are converted per job and not kept, so
 // held-source byte budgets are unchanged. FRC receives 420v copies of these
 // captures; comparing the BGRA captures can only find fewer static tiles,
@@ -8951,7 +8950,9 @@ presentationHost:(int64_t)presentationHost
     if (recovered && !_holdFailureStatus && !_srFailed) [self publishStatus:@"增强运行" failed:NO];
     _syntheticOK += outputs.count;
     CVPixelBufferRef submittedA = NULL, submittedB = NULL;
-    BOOL submittedPairTried = NO;
+    // The fused window-optimization presentation is the budget-miss path; it
+    // keeps its frame cost even when its processing size equals the capture.
+    BOOL submittedPairTried = _rife && _rife.fusedRifePresentEnabled;
     NSUInteger index = 0;
     for (SPOwnedPixelBuffer *box in outputs) {
         const NSUInteger phaseIndex = MIN(index, (NSUInteger)2);

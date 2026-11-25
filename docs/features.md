@@ -55,7 +55,7 @@ For live input, generated frames that keep the source dimensions take the captur
 pixels in every 16×16 tile whose two source pictures are identical, so text and
 controls away from motion stay sharp. A tile with any changed pixel keeps the
 generated picture, so detail next to a moving area can still soften. The Fast X2
-window optimization fallback generates at its reduced processing size and is not covered.
+window optimization fallback keeps its existing output and is not covered.
 For enhanced live output, Apple low latency requests a minimum 80 ms adaptive
 buffer, subject to the existing delay and memory caps. The presenter keeps the
 oldest eligible frame within two observed refresh periods, then catches up to
