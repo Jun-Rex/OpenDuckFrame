@@ -3676,6 +3676,7 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
     SPStaticTileRestorer *_staticTileRestorer;
     BOOL _staticTileRestorerUnavailable;
     uint64_t _staticTileFrames, _staticTileSkipped, _staticTilesRestored, _staticTilesTotal;
+    std::vector<int64_t> _staticTileRestoreNs;
     uint64_t _outputWarmGPUCompleted, _outputWarmGPUFailed, _outputWarmRejected;
     uint64_t _outputPresentedZeroTime, _outputPresentedValidTime;
     BOOL _pixelDiagnosticsEnabled;
@@ -4702,7 +4703,8 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
         @"lowLatencyPrescaledInputs": @(_lowPrescaleInputs), @"lowLatencySyntheticNoRescale": @(_lowSyntheticNoRescale),
         @"staticTileRestore": @{ @"frames": @(_staticTileFrames), @"skipped": @(_staticTileSkipped),
             @"restoredTiles": @(_staticTilesRestored), @"totalTiles": @(_staticTilesTotal),
-            @"unavailable": @(_staticTileRestorerUnavailable) },
+            @"unavailable": @(_staticTileRestorerUnavailable),
+            @"p95ms": @(SPStatsPercentileMs(_staticTileRestoreNs)) },
         @"processingWidth": @(processingWidth),
         @"processingHeight": @(processingHeight),
         @"lowLatencyProcessingWidth": @(_lowLatency ? _lowLatency.width : 0),
@@ -6472,22 +6474,35 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
     return found->second.yuv;
 }
 
-// The source pair as submitted to the engine, as +1 BGRA buffers. BGRA
-// captures are retained, not copied; other formats are converted per job and
-// not kept beyond it, so held-source byte budgets are unchanged.
-- (void)copySubmittedPairForJob:(const SPLiveJob *)job previous:(CVPixelBufferRef *)previous current:(CVPixelBufferRef *)current {
+// The source pair as submitted to the engine, as +1 BGRA buffers, fetched
+// only for a generated frame of the same size: the fused window-optimization
+// output (reduced processing size) costs no conversion. BGRA captures are
+// retained, not copied; other formats are converted per job and not kept, so
+// held-source byte budgets are unchanged. FRC receives 420v copies of these
+// captures; comparing the BGRA captures can only find fewer static tiles,
+// never mark a changed tile static, and pastes the higher-fidelity source.
+- (void)copySubmittedPairForJob:(const SPLiveJob *)job generated:(CVPixelBufferRef)generated
+                       previous:(CVPixelBufferRef *)previous current:(CVPixelBufferRef *)current {
     *previous = *current = NULL;
+    if (!generated) return;
     const uint64_t identities[2] = {job->frameA, job->frameB};
     CVPixelBufferRef *targets[2] = {previous, current};
     const BOOL prescaled = _lowLatency && [self requestUsesLowPrescale:_request width:_width height:_height];
+    const size_t width = CVPixelBufferGetWidth(generated), height = CVPixelBufferGetHeight(generated);
     for (int i = 0; i < 2; ++i) {
+        CVPixelBufferRef candidate = NULL;
         if (prescaled) {
-            CVPixelBufferRef cached = [self lowPrescaledForIdentity:identities[i]];
-            *targets[i] = cached ? CVPixelBufferRetain(cached) : NULL;
+            candidate = [self lowPrescaledForIdentity:identities[i]];
+            if (candidate) CVPixelBufferRetain(candidate);
         } else {
             auto found = _held.find(identities[i]);
-            *targets[i] = found != _held.end() && found->second.source ? [self bgraFromSource:found->second.source] : NULL;
+            CVPixelBufferRef source = found != _held.end() ? found->second.source : NULL;
+            // Converted captures are rounded down to even sizes; the restorer
+            // still requires exact dimensions.
+            if (source && (CVPixelBufferGetWidth(source) & ~(size_t)1) == width &&
+                (CVPixelBufferGetHeight(source) & ~(size_t)1) == height) candidate = [self bgraFromSource:source];
         }
+        *targets[i] = candidate;
     }
 }
 
@@ -6503,10 +6518,12 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
         _staticTileRestorerUnavailable = _staticTileRestorer == nil;
     }
     uint32_t restored = 0, total = 0;
+    const int64_t began = SPHostNow();
     CVPixelBufferRef output = _staticTileRestorer && previous && current
         ? [_staticTileRestorer copyRestoringGenerated:generated previous:previous current:current staticTiles:&restored totalTiles:&total]
         : NULL;
     if (total == 0) { _staticTileSkipped++; return generated; }
+    SPPushSample(_staticTileRestoreNs, SPHostToNs(SPHostNow() - began));
     _staticTileFrames++; _staticTilesRestored += restored; _staticTilesTotal += total;
     if (!output) return generated;
     CVPixelBufferRelease(generated);
@@ -7273,6 +7290,7 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
     _gpuToDisplayNs.clear();
     _captureToDisplayNs.clear();
     _captureToModelReadyNs.clear();
+    _staticTileRestoreNs.clear();
     _captureToOutputReadyNs.clear();
     _copyEntryNs.clear();
     _phaseRejectNoted = NO;
@@ -8933,15 +8951,19 @@ presentationHost:(int64_t)presentationHost
     if (recovered && !_holdFailureStatus && !_srFailed) [self publishStatus:@"增强运行" failed:NO];
     _syntheticOK += outputs.count;
     CVPixelBufferRef submittedA = NULL, submittedB = NULL;
-    [self copySubmittedPairForJob:job previous:&submittedA current:&submittedB];
+    BOOL submittedPairTried = NO;
     NSUInteger index = 0;
     for (SPOwnedPixelBuffer *box in outputs) {
         const NSUInteger phaseIndex = MIN(index, (NSUInteger)2);
         sp::SPRational pts = job->pts[phaseIndex];
         int64_t phaseDeadline = job->targetHost[phaseIndex];
         index += 1;
-        CVPixelBufferRef bgra = [self restoreStaticTiles:[self transfer:box.buffer format:kCVPixelFormatType_32BGRA]
-                                                previous:submittedA current:submittedB];
+        CVPixelBufferRef bgra = [self transfer:box.buffer format:kCVPixelFormatType_32BGRA];
+        if (!submittedPairTried && bgra) {
+            submittedPairTried = YES;
+            [self copySubmittedPairForJob:job generated:bgra previous:&submittedA current:&submittedB];
+        }
+        bgra = [self restoreStaticTiles:bgra previous:submittedA current:submittedB];
         if ([self requestUsesAsyncScale:_request]) {
             CVPixelBufferRef original = nil;
             auto sourceA = _held.find(job->frameA);

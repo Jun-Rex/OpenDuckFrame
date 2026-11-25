@@ -52,9 +52,10 @@ source dimensions; original frames, timestamps and output geometry are preserved
 The workbench reports the actual inference size. This resizing does not enable
 super resolution and can soften generated detail. File preparation is unchanged.
 For live input, generated frames that keep the source dimensions take the captured
-pixels in every 16×16 tile whose two source pictures are identical, so unchanged
-text and controls stay sharp; only changing areas show generated detail. The Fast X2
-window optimization fallback presents at its reduced processing size and is not covered.
+pixels in every 16×16 tile whose two source pictures are identical, so text and
+controls away from motion stay sharp. A tile with any changed pixel keeps the
+generated picture, so detail next to a moving area can still soften. The Fast X2
+window optimization fallback generates at its reduced processing size and is not covered.
 For enhanced live output, Apple low latency requests a minimum 80 ms adaptive
 buffer, subject to the existing delay and memory caps. The presenter keeps the
 oldest eligible frame within two observed refresh periods, then catches up to
