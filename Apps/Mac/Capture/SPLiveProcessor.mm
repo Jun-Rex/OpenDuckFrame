@@ -10,6 +10,7 @@
 #import "SPRealCUGAN.h"
 #import "SPDistilDRBA.h"
 #import "SPRifeBridge.h"
+#import "SPStaticTileRestorer.h"
 #include "SPAirRobustSourceLead.hpp"
 #include "SPAirWindowOptimization.hpp"
 #include "SPAirMeasurementTrace.hpp"
@@ -3672,6 +3673,9 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
     uint64_t _outputSurfaceToken;
     int64_t _outputSurfaceMinimumCaptureHost;
     uint64_t _lowPrescaleInputs, _lowSyntheticNoRescale, _testBaselineMatches, _testBaselineMismatches;
+    SPStaticTileRestorer *_staticTileRestorer;
+    BOOL _staticTileRestorerUnavailable;
+    uint64_t _staticTileFrames, _staticTileSkipped, _staticTilesRestored, _staticTilesTotal;
     uint64_t _outputWarmGPUCompleted, _outputWarmGPUFailed, _outputWarmRejected;
     uint64_t _outputPresentedZeroTime, _outputPresentedValidTime;
     BOOL _pixelDiagnosticsEnabled;
@@ -4696,6 +4700,9 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
         @"srInputHeight": @((int)SPLiveSRInputSizeForRequest(_width, _height, _request).height),
         @"lowLatencyPreScale": @([self requestUsesLowPrescale:_request width:_width height:_height]),
         @"lowLatencyPrescaledInputs": @(_lowPrescaleInputs), @"lowLatencySyntheticNoRescale": @(_lowSyntheticNoRescale),
+        @"staticTileRestore": @{ @"frames": @(_staticTileFrames), @"skipped": @(_staticTileSkipped),
+            @"restoredTiles": @(_staticTilesRestored), @"totalTiles": @(_staticTilesTotal),
+            @"unavailable": @(_staticTileRestorerUnavailable) },
         @"processingWidth": @(processingWidth),
         @"processingHeight": @(processingHeight),
         @"lowLatencyProcessingWidth": @(_lowLatency ? _lowLatency.width : 0),
@@ -6463,6 +6470,47 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
         found->second.yuv = [self transfer:found->second.source format:kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange];
     }
     return found->second.yuv;
+}
+
+// The source pair as submitted to the engine, as +1 BGRA buffers. BGRA
+// captures are retained, not copied; other formats are converted per job and
+// not kept beyond it, so held-source byte budgets are unchanged.
+- (void)copySubmittedPairForJob:(const SPLiveJob *)job previous:(CVPixelBufferRef *)previous current:(CVPixelBufferRef *)current {
+    *previous = *current = NULL;
+    const uint64_t identities[2] = {job->frameA, job->frameB};
+    CVPixelBufferRef *targets[2] = {previous, current};
+    const BOOL prescaled = _lowLatency && [self requestUsesLowPrescale:_request width:_width height:_height];
+    for (int i = 0; i < 2; ++i) {
+        if (prescaled) {
+            CVPixelBufferRef cached = [self lowPrescaledForIdentity:identities[i]];
+            *targets[i] = cached ? CVPixelBufferRetain(cached) : NULL;
+        } else {
+            auto found = _held.find(identities[i]);
+            *targets[i] = found != _held.end() && found->second.source ? [self bgraFromSource:found->second.source] : NULL;
+        }
+    }
+}
+
+// Issue #37: a whole window is interpolated, and engines that infer at a
+// reduced size soften text and controls that did not change. Tiles whose
+// submitted pair is bit-identical keep the captured pixels. Consumes
+// `generated`; returns the buffer to use.
+- (CVPixelBufferRef)restoreStaticTiles:(CVPixelBufferRef)generated previous:(CVPixelBufferRef)previous current:(CVPixelBufferRef)current {
+    if (!generated) return generated;
+    if (!_staticTileRestorer && !_staticTileRestorerUnavailable) {
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        _staticTileRestorer = device ? [[SPStaticTileRestorer alloc] initWithDevice:device error:NULL] : nil;
+        _staticTileRestorerUnavailable = _staticTileRestorer == nil;
+    }
+    uint32_t restored = 0, total = 0;
+    CVPixelBufferRef output = _staticTileRestorer && previous && current
+        ? [_staticTileRestorer copyRestoringGenerated:generated previous:previous current:current staticTiles:&restored totalTiles:&total]
+        : NULL;
+    if (total == 0) { _staticTileSkipped++; return generated; }
+    _staticTileFrames++; _staticTilesRestored += restored; _staticTilesTotal += total;
+    if (!output) return generated;
+    CVPixelBufferRelease(generated);
+    return output;
 }
 
 - (CVPixelBufferRef)lowPrescaledForIdentity:(uint64_t)identity {
@@ -8884,13 +8932,16 @@ presentationHost:(int64_t)presentationHost
     if (!_srFailed) _resolved.unavailableReason = @"";
     if (recovered && !_holdFailureStatus && !_srFailed) [self publishStatus:@"增强运行" failed:NO];
     _syntheticOK += outputs.count;
+    CVPixelBufferRef submittedA = NULL, submittedB = NULL;
+    [self copySubmittedPairForJob:job previous:&submittedA current:&submittedB];
     NSUInteger index = 0;
     for (SPOwnedPixelBuffer *box in outputs) {
         const NSUInteger phaseIndex = MIN(index, (NSUInteger)2);
         sp::SPRational pts = job->pts[phaseIndex];
         int64_t phaseDeadline = job->targetHost[phaseIndex];
         index += 1;
-        CVPixelBufferRef bgra = [self transfer:box.buffer format:kCVPixelFormatType_32BGRA];
+        CVPixelBufferRef bgra = [self restoreStaticTiles:[self transfer:box.buffer format:kCVPixelFormatType_32BGRA]
+                                                previous:submittedA current:submittedB];
         if ([self requestUsesAsyncScale:_request]) {
             CVPixelBufferRef original = nil;
             auto sourceA = _held.find(job->frameA);
@@ -8938,6 +8989,8 @@ presentationHost:(int64_t)presentationHost
         [self enqueueReadyEnhanced:scaled original:original pts:pts synthetic:YES held:NO
                       captureHost:job->captureHost generation:job->generation deadlineHost:phaseDeadline jobID:job->diagnosticID geometryHost:geometryHost];
     }
+    if (submittedA) CVPixelBufferRelease(submittedA);
+    if (submittedB) CVPixelBufferRelease(submittedB);
     if (!_rifePending.empty() && _rifePendingGeneration == _sourceGeneration && (_rife || _lowLatency) && !_stopped) {
         auto pending = _rifePending;
         uint64_t pendingGeneration = _rifePendingGeneration;
