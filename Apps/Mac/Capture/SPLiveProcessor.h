@@ -98,6 +98,8 @@ FOUNDATION_EXPORT BOOL SPWindowNativeFits(double taskMs, double refreshHz);
 @property (nonatomic) BOOL rifeStreamEnabled;
 /// Opt-in visible 24/25/30 FPS estimation and retiming for live Apple low latency.
 @property (nonatomic) BOOL automaticVideoCadence;
+/// Live Apple inference budget: 0 preserves API limits, 720 favors throughput.
+@property (nonatomic) int lowLatencyProcessingPreset;
 @end
 
 @interface SPLiveResolvedPlan : NSObject

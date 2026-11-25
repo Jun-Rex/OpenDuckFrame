@@ -17,6 +17,12 @@ struct DisplayQueueFrame {
 
 constexpr std::size_t displayQueueCapacity = 4;
 
+inline int64_t presentationSelectionGuardNs(bool lowLatency, int64_t existingGuardNs) {
+    // Texture mapping and command encoding must finish before CA's submission
+    // deadline. Selecting earlier does not move the frozen media/display target.
+    return lowLatency && existingGuardNs < 3000000 ? 3000000 : existingGuardNs;
+}
+
 struct DisplaySlotContext {
     uint64_t generation = 0, config = 0, measurementEpoch = 0, clockEpoch = 0;
 };

@@ -41,7 +41,7 @@ require_argument() {
 
 RELEASE_DIR=""
 TEAM_ID=""
-REPO="Jun-bao/OpenDuckFrame"
+REPO="Jun-Rex/OpenDuckFrame"
 NOTES_FILE=""
 DRAFT=0
 

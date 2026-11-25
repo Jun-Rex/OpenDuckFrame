@@ -2,7 +2,8 @@ import Foundation
 import CoreVideo
 
 // Serialized by the capture queue. The borrowed surface is read only during
-// evaluate; no CVPixelBuffer or full frame is retained after it returns.
+// evaluate; no capture-owned CVPixelBuffer is retained after it returns.
+// An owned pixel snapshot confirms duplicates without borrowing an IOSurface.
 final class ContentFrameGate {
     enum Decision { case accepted, duplicate, forced, unavailable }
     private var generation: UInt64?
@@ -10,6 +11,7 @@ final class ContentFrameGate {
     private var format: OSType = 0
     private var coordinates: [(x: Int, y: Int)] = []
     private var previous: [UInt8] = []
+    private var previousPixels: [UInt8] = []
     private var lastAcceptedNs: Int64?
     private var distinctTimes: [Int64] = []
     private var elapsedNs: [UInt64] = []
@@ -31,6 +33,13 @@ final class ContentFrameGate {
         return points
     }
 
+    /// Frees the owned pixel snapshot once its stream has retired. Counters stay
+    /// for diagnostics; the next frame has nothing to match and is accepted.
+    func releaseSnapshot() {
+        previous.removeAll()
+        previousPixels = []
+    }
+
     func evaluate(buffer: CVPixelBuffer, generation nextGeneration: UInt64, hostNs: Int64) -> Decision {
         let start = mach_absolute_time()
         defer {
@@ -44,6 +53,7 @@ final class ContentFrameGate {
             generation = nextGeneration; width = w; height = h; format = f
             coordinates = Self.sampleCoordinates(width: w, height: h)
             previous.removeAll(keepingCapacity: true); lastAcceptedNs = nil
+            previousPixels.removeAll()
             distinctTimes.removeAll(keepingCapacity: true)
             accepted = 0; duplicates = 0; forced = 0; unavailable = 0; buckets = [0, 0, 0, 0, 0]
             elapsedNs.removeAll(keepingCapacity: true)
@@ -61,6 +71,33 @@ final class ContentFrameGate {
         let bytes = base.assumingMemoryBound(to: UInt8.self)
         let stride = planar ? CVPixelBufferGetBytesPerRowOfPlane(buffer, 0) : CVPixelBufferGetBytesPerRow(buffer)
         let chromaStride = planar ? CVPixelBufferGetBytesPerRowOfPlane(buffer, 1) : 0
+        // Sampling can prove a change, but cannot prove equality. Compare all
+        // active bytes when samples match, including unquantized color/chroma.
+        let planes: [(base: UnsafePointer<UInt8>, stride: Int, bytes: Int, rows: Int)] = planar
+            ? [(UnsafePointer(bytes), stride, w, h), (UnsafePointer(chroma!), chromaStride, CVPixelBufferGetWidthOfPlane(buffer, 1) * 2, CVPixelBufferGetHeightOfPlane(buffer, 1))]
+            : [(UnsafePointer(bytes), stride, w * 4, h)]
+        let pixelCount = planes.reduce(0) { $0 + $1.bytes * $1.rows }
+        func rememberPixels() {
+            if previousPixels.count != pixelCount { previousPixels = [UInt8](repeating: 0, count: pixelCount) }
+            previousPixels.withUnsafeMutableBytes { destination in
+                var offset = 0
+                for plane in planes { for row in 0..<plane.rows {
+                    memcpy(destination.baseAddress!.advanced(by: offset), plane.base.advanced(by: row * plane.stride), plane.bytes)
+                    offset += plane.bytes
+                } }
+            }
+        }
+        func pixelsMatch() -> Bool {
+            guard previousPixels.count == pixelCount else { return false }
+            return previousPixels.withUnsafeBytes { saved in
+                var offset = 0
+                for plane in planes { for row in 0..<plane.rows {
+                    if memcmp(saved.baseAddress!.advanced(by: offset), plane.base.advanced(by: row * plane.stride), plane.bytes) != 0 { return false }
+                    offset += plane.bytes
+                } }
+                return true
+            }
+        }
         var values = [UInt8](repeating: 0, count: coordinates.count * 3)
         var changes = 0
         coordinates.withUnsafeBufferPointer { points in
@@ -94,14 +131,16 @@ final class ContentFrameGate {
         prune(nowNs: hostNs)
         guard !previous.isEmpty else {
             previous = values; lastAcceptedNs = hostNs; accepted += 1
+            rememberPixels()
             if hostNs > 0 { distinctTimes.append(hostNs) }
             return .accepted
         }
         let ratio = Double(changes) / Double(coordinates.count)
         let bucket = changes == 0 ? 0 : (ratio < 0.001 ? 1 : (ratio < 0.01 ? 2 : (ratio < 0.1 ? 3 : 4)))
         buckets[bucket] += 1
-        if changes > 0 {
+        if changes > 0 || !pixelsMatch() {
             previous = values; lastAcceptedNs = hostNs; accepted += 1
+            rememberPixels()
             if hostNs > 0 { distinctTimes.append(hostNs) }
             return .accepted
         }
@@ -126,6 +165,7 @@ final class ContentFrameGate {
         let times = elapsedNs.sorted()
         let p95 = times.isEmpty ? -1 : Double(times[(times.count - 1) * 95 / 100]) / 1e6
         return ["contentAccepted": accepted, "contentDuplicates": duplicates, "contentForced": forced,
+                "contentSnapshotBytes": previousPixels.count,
                 "contentDistinctFPS": fps, "contentFingerprintP95Ms": p95, "contentUnavailable": unavailable,
                 "contentChangeRatioBuckets": ["0": buckets[0], "lt0.1pct": buckets[1], "lt1pct": buckets[2], "lt10pct": buckets[3], "ge10pct": buckets[4]]]
     }

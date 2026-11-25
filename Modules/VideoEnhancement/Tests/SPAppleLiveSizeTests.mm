@@ -23,10 +23,10 @@ static CVPixelBufferRef source(int width, int height, int offset) {
     return buffer;
 }
 
-static NSDictionary *runSize(int width, int height, NSInteger slots) {
+static NSDictionary *runSize(int width, int height, NSInteger slots, int preset=0) {
     SPLowLatencyEngine *engine=[NSClassFromString(@"SPLowLatencyEngine") new];
     NSError *prepareError=nil;
-    BOOL prepared=[engine prepareLiveWidth:width height:height frames:slots error:&prepareError];
+    BOOL prepared=[engine prepareLiveWidth:width height:height frames:slots processingPreset:preset error:&prepareError];
     if (!prepared) return @{@"ok":@NO, @"error":prepareError.localizedDescription ?: @"prepare"};
     NSInteger maxDimension=1280, maxPixels=1280*720;
     if (@available(macOS 27.0, *)) {
@@ -37,6 +37,7 @@ static NSDictionary *runSize(int width, int height, NSInteger slots) {
         (maxDimension<=0 || (engine.width<=maxDimension && engine.height<=maxDimension)) &&
         (maxPixels<=0 || (int64_t)engine.width*engine.height<=maxPixels);
     BOOL unchangedSmall=width!=1280 || height!=720 || (engine.width==width && engine.height==height);
+    if (preset==720) bounded=bounded && engine.width<=1280 && engine.height<=1280 && (int64_t)engine.width*engine.height<=1280*720;
     CVPixelBufferRef a=source(width,height,0), b=source(width,height,24);
     NSArray *phases=slots==2 ? @[@0.25,@0.5,@0.75] : @[@0.5];
     dispatch_semaphore_t done=dispatch_semaphore_create(0);
@@ -58,6 +59,7 @@ static NSDictionary *runSize(int width, int height, NSInteger slots) {
     if(a) CVPixelBufferRelease(a); if(b) CVPixelBufferRelease(b);
     NSDictionary *report=@{@"ok":@(prepared && bounded && unchangedSmall && submitted && finished && geometry && color && tokenOK && !runError && sourceIntact),
         @"input":@[@(width),@(height)], @"processing":@[@(engine.width),@(engine.height)],
+        @"processingPreset":@(preset),
         @"phases":phases, @"outputCount":@(outputs.count), @"sourceGeometryPreserved":@(sourceIntact),
         @"outputGeometryPreserved":@(geometry), @"bt709Preserved":@(color), @"bounded":@(bounded),
         @"error":runError.localizedDescription ?: @"", @"fallbackReason":engine.preparationFallbackReason};
@@ -71,6 +73,7 @@ static NSDictionary *runLivePlan(void) {
     request.interpolationEnabled=YES; request.engineID=@"apple.lowlatency"; request.modelID=@"vt.llfi.temporal.1";
     request.rateKind=SPLiveRateMultiplier; request.multiplier=2; request.displayRefreshHz=60;
     request.captureSourceKind=SPLiveCaptureSourceKindWindow;
+    request.lowLatencyProcessingPreset=720;
     [processor updateRequest:request];
     CVPixelBufferRef first=source(2560,1410,0);
     [processor pushPixelBuffer:first ptsNum:0 ptsDen:30 host:mach_absolute_time() generation:7];
@@ -87,6 +90,8 @@ static NSDictionary *runLivePlan(void) {
         [stats[@"syntheticOK"] intValue]>0 && [stats[@"syntheticFail"] intValue]==0 &&
         fabs([stats[@"estimatedRequestedFPS"] doubleValue]-60)<0.1 &&
         [stats[@"sourceWidth"] intValue]==2560 && [stats[@"sourceHeight"] intValue]==1410 &&
+        [stats[@"processingWidth"] intValue]<=1280 && [stats[@"processingHeight"] intValue]<=1280 &&
+        [stats[@"lowLatencyProcessingPreset"] intValue]==720 &&
         processor.resolvedPlan.outputWidth==2560 && processor.resolvedPlan.outputHeight==1410;
     NSDictionary *result=@{@"ok":@(ok), @"targetFPS":stats[@"estimatedRequestedFPS"] ?: @(-1),
         @"generated":stats[@"syntheticOK"] ?: @0, @"error":processor.resolvedPlan.unavailableReason ?: @""};
@@ -100,6 +105,8 @@ int main(int argc,const char **argv) { @autoreleasepool {
         NSMutableArray *cases=[NSMutableArray array];
         for(NSArray *size in @[@[@1280,@720,@1],@[@2560,@1410,@1],@[@5120,@2820,@2],@[@1410,@2560,@1]])
             [cases addObject:runSize([size[0] intValue],[size[1] intValue],[size[2] integerValue])];
+        [cases addObject:runSize(2560,1440,1,720)];
+        [cases addObject:runSize(1410,2560,1,720)];
         SPLowLatencyEngine *invalid=[NSClassFromString(@"SPLowLatencyEngine") new];
         NSError *error=nil;
         BOOL oddRejected=![invalid prepareLiveWidth:1279 height:720 frames:1 error:&error] && error!=nil;

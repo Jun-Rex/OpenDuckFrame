@@ -10,6 +10,7 @@
 #import "SPRealCUGAN.h"
 #import "SPDistilDRBA.h"
 #import "SPRifeBridge.h"
+#import "SPStaticTileRestorer.h"
 #include "SPAirRobustSourceLead.hpp"
 #include "SPAirWindowOptimization.hpp"
 #include "SPAirMeasurementTrace.hpp"
@@ -396,11 +397,11 @@ static double SPPercentileMs(std::vector<int64_t> samples) {
 
 // Statistics use a fixed recent window. Control-policy percentiles retain
 // their existing full-history helper and sample storage.
-static double SPStatsPercentileMs(const std::vector<int64_t> &samples) {
+static double SPStatsPercentileMs(const std::vector<int64_t> &samples, size_t percentile = 95) {
     if (samples.empty()) return -1;
     const size_t count = std::min(samples.size(), size_t{1024});
     std::vector<int64_t> recent(samples.end() - count, samples.end());
-    const size_t index = (recent.size() - 1) * 95 / 100;
+    const size_t index = (recent.size() - 1) * percentile / 100;
     std::nth_element(recent.begin(), recent.begin() + index, recent.end());
     return (double)recent[index] / 1e6;
 }
@@ -718,6 +719,7 @@ static NSSize SPLiveSRInputSizeForRequest(int width, int height, SPLivePlanReque
     copy.qualityID = self.qualityID ?: @"";
     copy.rifeStreamEnabled = self.rifeStreamEnabled;
     copy.automaticVideoCadence = self.automaticVideoCadence;
+    copy.lowLatencyProcessingPreset = self.lowLatencyProcessingPreset;
     copy.captureSourceKind = self.captureSourceKind;
     return copy;
 }
@@ -1785,7 +1787,9 @@ static NSDictionary *SPAirFusedRenderExport(const SPAirFusedRenderPtr &record) {
         [self resetAirDisplayPolicyLocked];
     }
 }
-- (int64_t)selectionGuardNs { return _selectionGuardNs.load(); }
+- (int64_t)selectionGuardNs {
+    return sp::presentationSelectionGuardNs(_lowLatencyPresentationEnabled.load(), _selectionGuardNs.load());
+}
 
 - (void)setPresentedVideoReadbackEnabled:(BOOL)enabled {
 #if ODF_AIR_FUSED_RIFE_PRESENT_DIAGNOSTIC
@@ -3669,6 +3673,10 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
     uint64_t _outputSurfaceToken;
     int64_t _outputSurfaceMinimumCaptureHost;
     uint64_t _lowPrescaleInputs, _lowSyntheticNoRescale, _testBaselineMatches, _testBaselineMismatches;
+    SPStaticTileRestorer *_staticTileRestorer;
+    BOOL _staticTileRestorerUnavailable;
+    uint64_t _staticTileFrames, _staticTileSkipped, _staticTilesRestored, _staticTilesTotal;
+    std::vector<int64_t> _staticTileRestoreNs;
     uint64_t _outputWarmGPUCompleted, _outputWarmGPUFailed, _outputWarmRejected;
     uint64_t _outputPresentedZeroTime, _outputPresentedValidTime;
     BOOL _pixelDiagnosticsEnabled;
@@ -4693,11 +4701,17 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
         @"srInputHeight": @((int)SPLiveSRInputSizeForRequest(_width, _height, _request).height),
         @"lowLatencyPreScale": @([self requestUsesLowPrescale:_request width:_width height:_height]),
         @"lowLatencyPrescaledInputs": @(_lowPrescaleInputs), @"lowLatencySyntheticNoRescale": @(_lowSyntheticNoRescale),
+        @"staticTileRestore": @{ @"frames": @(_staticTileFrames), @"skipped": @(_staticTileSkipped),
+            @"restoredTiles": @(_staticTilesRestored), @"totalTiles": @(_staticTilesTotal),
+            @"unavailable": @(_staticTileRestorerUnavailable),
+            @"p50ms": @(SPStatsPercentileMs(_staticTileRestoreNs, 50)),
+            @"p95ms": @(SPStatsPercentileMs(_staticTileRestoreNs)) },
         @"processingWidth": @(processingWidth),
         @"processingHeight": @(processingHeight),
         @"lowLatencyProcessingWidth": @(_lowLatency ? _lowLatency.width : 0),
         @"lowLatencyProcessingHeight": @(_lowLatency ? _lowLatency.height : 0),
         @"lowLatencyPreparationFallbackReason": _lowLatency.preparationFallbackReason ?: @"",
+        @"lowLatencyProcessingPreset": @(_request.lowLatencyProcessingPreset),
         @"lowLatencyProcessingOrder": [self requestUsesLowPrescale:_request width:_width height:_height] ? @"lanczos-before-low-latency" : @"interpolation-before-scale",
         @"estimatedContentFPS": @((double)_windowChanged / seconds),
         @"r7ContentChange": @{ @"host": @(_r7ContentChangedHost),
@@ -5458,7 +5472,7 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
             NSInteger frames = (copy.rateKind == SPLiveRateFixedFPS || copy.multiplier >= 4) ? 2 : 1;
             lowLatency = [[SPLowLatencyEngine alloc] init];
             BOOL pre=[self requestUsesLowPrescale:copy width:width height:height];
-            if (![lowLatency prepareLiveWidth:pre ? copy.outputWidth : width height:pre ? copy.outputHeight : height frames:frames error:&error]) lowLatency = nil;
+            if (![lowLatency prepareLiveWidth:pre ? copy.outputWidth : width height:pre ? copy.outputHeight : height frames:frames processingPreset:copy.lowLatencyProcessingPreset error:&error]) lowLatency = nil;
             else copy.modelID = lowLatency.modelID;
         } else if (copy.interpolationEnabled && [engine isEqualToString:@"rife.metal"]) {
             if (!copy.modelID.length) copy.modelID = @"rife-v4.25";
@@ -6461,6 +6475,61 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
     return found->second.yuv;
 }
 
+// The source pair as submitted to the engine, as +1 BGRA buffers, fetched
+// only for a generated frame of the same size. BGRA captures are
+// retained, not copied; other formats are converted per job and not kept, so
+// held-source byte budgets are unchanged. FRC receives 420v copies of these
+// captures; comparing the BGRA captures can only find fewer static tiles,
+// never mark a changed tile static, and pastes the higher-fidelity source.
+- (void)copySubmittedPairForJob:(const SPLiveJob *)job generated:(CVPixelBufferRef)generated
+                       previous:(CVPixelBufferRef *)previous current:(CVPixelBufferRef *)current {
+    *previous = *current = NULL;
+    if (!generated) return;
+    const uint64_t identities[2] = {job->frameA, job->frameB};
+    CVPixelBufferRef *targets[2] = {previous, current};
+    const BOOL prescaled = _lowLatency && [self requestUsesLowPrescale:_request width:_width height:_height];
+    const size_t width = CVPixelBufferGetWidth(generated), height = CVPixelBufferGetHeight(generated);
+    for (int i = 0; i < 2; ++i) {
+        CVPixelBufferRef candidate = NULL;
+        if (prescaled) {
+            candidate = [self lowPrescaledForIdentity:identities[i]];
+            if (candidate) CVPixelBufferRetain(candidate);
+        } else {
+            auto found = _held.find(identities[i]);
+            CVPixelBufferRef source = found != _held.end() ? found->second.source : NULL;
+            // Converted captures are rounded down to even sizes; the restorer
+            // still requires exact dimensions.
+            if (source && (CVPixelBufferGetWidth(source) & ~(size_t)1) == width &&
+                (CVPixelBufferGetHeight(source) & ~(size_t)1) == height) candidate = [self bgraFromSource:source];
+        }
+        *targets[i] = candidate;
+    }
+}
+
+// Issue #37: a whole window is interpolated, and engines that infer at a
+// reduced size soften text and controls that did not change. Tiles whose
+// submitted pair is bit-identical keep the captured pixels. Consumes
+// `generated`; returns the buffer to use.
+- (CVPixelBufferRef)restoreStaticTiles:(CVPixelBufferRef)generated previous:(CVPixelBufferRef)previous current:(CVPixelBufferRef)current {
+    if (!generated) return generated;
+    if (!_staticTileRestorer && !_staticTileRestorerUnavailable) {
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        _staticTileRestorer = device ? [[SPStaticTileRestorer alloc] initWithDevice:device error:NULL] : nil;
+        _staticTileRestorerUnavailable = _staticTileRestorer == nil;
+    }
+    uint32_t restored = 0, total = 0;
+    const int64_t began = SPHostNow();
+    CVPixelBufferRef output = _staticTileRestorer && previous && current
+        ? [_staticTileRestorer copyRestoringGenerated:generated previous:previous current:current staticTiles:&restored totalTiles:&total]
+        : NULL;
+    if (total == 0) { _staticTileSkipped++; return generated; }
+    SPPushSample(_staticTileRestoreNs, SPHostToNs(SPHostNow() - began));
+    _staticTileFrames++; _staticTilesRestored += restored; _staticTilesTotal += total;
+    if (!output) return generated;
+    CVPixelBufferRelease(generated);
+    return output;
+}
+
 - (CVPixelBufferRef)lowPrescaledForIdentity:(uint64_t)identity {
     auto found=_held.find(identity);
     if (found==_held.end() || !_scaler) return NULL;
@@ -7221,6 +7290,7 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
     _gpuToDisplayNs.clear();
     _captureToDisplayNs.clear();
     _captureToModelReadyNs.clear();
+    _staticTileRestoreNs.clear();
     _captureToOutputReadyNs.clear();
     _copyEntryNs.clear();
     _phaseRejectNoted = NO;
@@ -8880,6 +8950,10 @@ presentationHost:(int64_t)presentationHost
     if (!_srFailed) _resolved.unavailableReason = @"";
     if (recovered && !_holdFailureStatus && !_srFailed) [self publishStatus:@"增强运行" failed:NO];
     _syntheticOK += outputs.count;
+    CVPixelBufferRef submittedA = NULL, submittedB = NULL;
+    // The fused window-optimization presentation is the budget-miss path; it
+    // keeps its frame cost even when its processing size equals the capture.
+    BOOL submittedPairTried = _rife && _rife.fusedRifePresentEnabled;
     NSUInteger index = 0;
     for (SPOwnedPixelBuffer *box in outputs) {
         const NSUInteger phaseIndex = MIN(index, (NSUInteger)2);
@@ -8887,6 +8961,11 @@ presentationHost:(int64_t)presentationHost
         int64_t phaseDeadline = job->targetHost[phaseIndex];
         index += 1;
         CVPixelBufferRef bgra = [self transfer:box.buffer format:kCVPixelFormatType_32BGRA];
+        if (!submittedPairTried && bgra) {
+            submittedPairTried = YES;
+            [self copySubmittedPairForJob:job generated:bgra previous:&submittedA current:&submittedB];
+        }
+        bgra = [self restoreStaticTiles:bgra previous:submittedA current:submittedB];
         if ([self requestUsesAsyncScale:_request]) {
             CVPixelBufferRef original = nil;
             auto sourceA = _held.find(job->frameA);
@@ -8934,6 +9013,8 @@ presentationHost:(int64_t)presentationHost
         [self enqueueReadyEnhanced:scaled original:original pts:pts synthetic:YES held:NO
                       captureHost:job->captureHost generation:job->generation deadlineHost:phaseDeadline jobID:job->diagnosticID geometryHost:geometryHost];
     }
+    if (submittedA) CVPixelBufferRelease(submittedA);
+    if (submittedB) CVPixelBufferRelease(submittedB);
     if (!_rifePending.empty() && _rifePendingGeneration == _sourceGeneration && (_rife || _lowLatency) && !_stopped) {
         auto pending = _rifePending;
         uint64_t pendingGeneration = _rifePendingGeneration;

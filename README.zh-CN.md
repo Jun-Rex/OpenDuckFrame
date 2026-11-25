@@ -28,8 +28,8 @@ OpenDuckFrame 是一款原生 Mac 画质增强应用。浏览器视频、游戏�
 
 ## 开始使用
 
-下载 [Mac 安装包](https://github.com/Jun-bao/OpenDuckFrame/releases/latest/download/OpenDuckFrame.dmg)，
-或查看 [版本列表](https://github.com/Jun-bao/OpenDuckFrame/releases)。
+下载 [Mac 安装包](https://github.com/Jun-Rex/OpenDuckFrame/releases/latest/download/OpenDuckFrame.dmg)，
+或查看 [版本列表](https://github.com/Jun-Rex/OpenDuckFrame/releases)。
 社区安装包使用临时签名，**未经过 Apple 公证**，首次打开可能被 macOS 拦截。
 确认信任来源后，由你在系统设置 → 隐私与安全性中决定是否允许打开。
 由于社区版使用临时签名，升级后可能需要重新授予屏幕录制或辅助功能权限。
@@ -62,7 +62,7 @@ OpenDuckFrame 是一款原生 Mac 画质增强应用。浏览器视频、游戏�
 
 目前不支持 Intel Mac、Windows、iPhone 或 iPad。倍率代表请求的处理模式，实际显示帧率需要以运行结果为准。
 
-Apple 低延迟在窗口／显示器模式下会按设备支持的尺寸处理，再将生成帧恢复到来源尺寸；工作台显示实际处理尺寸。缩小处理尺寸可能使生成帧的细节变软，文件输入仍保留原有尺寸要求。
+Apple 低延迟在窗口／显示器模式下会按设备支持的尺寸处理，再将生成帧恢复到来源尺寸；工作台显示实际处理尺寸。缩小处理尺寸可能使生成帧的细节变软；实时窗口里远离运动的部分直接使用原始画面，变软只出现在变化区域及其紧邻处。文件输入仍保留原有尺寸要求。
 实时增强还会在时间与内存上限内预留至少 80 毫秒自适应缓冲，并在有限延迟内按顺序呈现有效帧，以部分操作响应速度换取更稳定的输出；这不保证达到 60 FPS。
 0.5.0 为苹果低延迟实时增强增加可选的“自动视频”：估计常见 24／25／30 FPS 并整理播放时间轴，申请更多缓冲（140 毫秒，受上限约束）。默认仍为“通用窗口”。声音由原应用播放，可能感知到音画偏移。
 
@@ -76,7 +76,7 @@ Fast X2 窗口优化按 GPU 能力、内存上限和准备时的实测耗时判�
 
 ```sh
 brew install xcodegen meson ninja cmake pkg-config
-git clone https://github.com/Jun-bao/OpenDuckFrame.git
+git clone https://github.com/Jun-Rex/OpenDuckFrame.git
 cd OpenDuckFrame
 ./Apps/Mac/Scripts/build.sh Debug
 open .build/Build/Products/Debug/OpenDuckFrame.app
@@ -116,8 +116,8 @@ docs/              上手、功能与项目说明
 
 ## 交流与参与
 
-故障和功能建议请提交 [Issue](https://github.com/Jun-bao/OpenDuckFrame/issues)，
-使用问题和配置分享可前往 [Discussions](https://github.com/Jun-bao/OpenDuckFrame/discussions)。
+故障和功能建议请提交 [Issue](https://github.com/Jun-Rex/OpenDuckFrame/issues)，
+使用问题和配置分享可前往 [Discussions](https://github.com/Jun-Rex/OpenDuckFrame/discussions)。
 反馈时附上应用版本、macOS 版本、Mac 型号、来源分辨率、引擎和实际输出帧率；不要直接上传私人画面或未经检查的诊断日志。
 
 开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题的私下反馈方式见 [SECURITY.md](SECURITY.md)，

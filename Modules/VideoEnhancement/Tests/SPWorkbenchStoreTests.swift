@@ -282,11 +282,15 @@ private final class SourceSizeControls {
    preview.refreshActions()
    precondition(!preview.isEnhancing && preview.stopButton?.isHidden == false,
      "A source-only capture must remain stoppable before an engine commits or after preparation fails")
+   precondition(preview.stopButton?.title == "Stop Capture",
+     "Source-only capture must not be labeled as active enhancement")
    precondition(preview.startButton?.isHidden == false && preview.startButton?.isEnabled == true,
      "Showing Stop for source preview must preserve the enhancement start action")
    preview.pendingApply = preview.profile
    preview.refreshActions()
    precondition(preview.startButton?.title == "Cancel" && preview.stopButton?.isHidden == false)
+   precondition(preview.stopButton?.title == "Stop Capture",
+     "Pending engine preparation must not relabel source-only capture as enhancement")
    preview.capture.running = false
    preview.pendingApply = nil
    preview.refreshActions()
@@ -387,8 +391,10 @@ private final class SourceSizeControls {
   precondition(WorkbenchTitle.text("画质工作台",version:nil) == "画质工作台")
   var oldProfile = try JSONSerialization.jsonObject(with: JSONEncoder().encode(EnhancementProfile())) as! [String: Any]
   oldProfile.removeValue(forKey:"automaticVideoCadence")
+  oldProfile.removeValue(forKey:"lowLatencyProcessingPreset")
   let legacyTiming = EnhancementProfileStore.decode(try JSONSerialization.data(withJSONObject:oldProfile),fallbackName:"legacy")!
   precondition(!legacyTiming.automaticVideoCadence, "Existing profiles must retain general window timing")
+  precondition(legacyTiming.lowLatencyProcessingPreset == 0, "Existing profiles must retain automatic processing size")
   for source in ["window", "display", "file"] {
    for engine in ["apple.lowlatency", "apple.frc", "rife.metal"] {
     var timing = EnhancementProfile()
@@ -400,6 +406,13 @@ private final class SourceSizeControls {
     let changes=WorkbenchActionControls(); changes.profile=timing
     var baseline=timing; baseline.automaticVideoCadence=false
     precondition(changes.hasChanges(relativeTo:baseline) == active)
+    var smaller=timing; smaller.lowLatencyProcessingPreset=720
+    let detail=EnhancementProfileStore.decode(try JSONEncoder().encode(smaller),fallbackName:"detail")!
+    precondition(detail.lowLatencyProcessingPreset == 720, "Processing budget must survive saving")
+    changes.profile=smaller
+    precondition(changes.hasChanges(relativeTo:timing) == active, "Only live Apple interpolation applies this budget")
+    var resetDetail=smaller; applyDefaultPreset(&resetDetail)
+    precondition(resetDetail.lowLatencyProcessingPreset == 0)
    }
   }
   oldProfile.removeValue(forKey:"windowOutputMode")

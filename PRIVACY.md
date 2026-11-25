@@ -35,8 +35,8 @@ settings. No microphone recording is used.
 ## Software updates
 
 Community downloads check the signed version feed at
-`https://jun-bao.github.io/OpenDuckFrame/appcast.xml` and download updates from
-`https://github.com/Jun-bao/OpenDuckFrame/releases`. These requests expose normal
+`https://jun-rex.github.io/OpenDuckFrame/appcast.xml` and download updates from
+`https://github.com/Jun-Rex/OpenDuckFrame/releases`. These requests expose normal
 connection information such as IP address and an updater User-Agent to GitHub.
 System profiling and installation statistics are disabled; no media, screen
 content, subtitles, playback history or persistent installation identifier is sent.
