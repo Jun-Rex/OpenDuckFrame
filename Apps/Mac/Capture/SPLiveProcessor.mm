@@ -397,11 +397,11 @@ static double SPPercentileMs(std::vector<int64_t> samples) {
 
 // Statistics use a fixed recent window. Control-policy percentiles retain
 // their existing full-history helper and sample storage.
-static double SPStatsPercentileMs(const std::vector<int64_t> &samples) {
+static double SPStatsPercentileMs(const std::vector<int64_t> &samples, size_t percentile = 95) {
     if (samples.empty()) return -1;
     const size_t count = std::min(samples.size(), size_t{1024});
     std::vector<int64_t> recent(samples.end() - count, samples.end());
-    const size_t index = (recent.size() - 1) * 95 / 100;
+    const size_t index = (recent.size() - 1) * percentile / 100;
     std::nth_element(recent.begin(), recent.begin() + index, recent.end());
     return (double)recent[index] / 1e6;
 }
@@ -4704,6 +4704,7 @@ static NSDictionary *SPAirDelayAlignmentExport(const std::vector<SPAirDelayAlign
         @"staticTileRestore": @{ @"frames": @(_staticTileFrames), @"skipped": @(_staticTileSkipped),
             @"restoredTiles": @(_staticTilesRestored), @"totalTiles": @(_staticTilesTotal),
             @"unavailable": @(_staticTileRestorerUnavailable),
+            @"p50ms": @(SPStatsPercentileMs(_staticTileRestoreNs, 50)),
             @"p95ms": @(SPStatsPercentileMs(_staticTileRestoreNs)) },
         @"processingWidth": @(processingWidth),
         @"processingHeight": @(processingHeight),

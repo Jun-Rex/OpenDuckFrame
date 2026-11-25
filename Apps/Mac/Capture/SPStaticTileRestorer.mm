@@ -9,6 +9,8 @@ static const int SPStaticTile = 16;
     id<MTLComputePipelineState> _pipeline;
     id<MTLBuffer> _counter;
     CVMetalTextureCacheRef _cache;
+    CVPixelBufferPoolRef _pool;
+    size_t _poolWidth, _poolHeight;
 }
 
 + (int)tileSize { return SPStaticTile; }
@@ -40,6 +42,24 @@ static const int SPStaticTile = 16;
 
 - (void)dealloc {
     if (_cache) CFRelease(_cache);
+    if (_pool) CVPixelBufferPoolRelease(_pool);
+}
+
+// Output buffers are recycled; a new IOSurface per generated frame costs
+// more than the tile pass itself.
+- (CVPixelBufferRef)createOutputWidth:(size_t)width height:(size_t)height {
+    if (!_pool || _poolWidth != width || _poolHeight != height) {
+        if (_pool) CVPixelBufferPoolRelease(_pool);
+        _pool = NULL;
+        NSDictionary *attributes = @{(id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
+            (id)kCVPixelBufferWidthKey: @(width), (id)kCVPixelBufferHeightKey: @(height),
+            (id)kCVPixelBufferIOSurfacePropertiesKey: @{}, (id)kCVPixelBufferMetalCompatibilityKey: @YES};
+        if (CVPixelBufferPoolCreate(kCFAllocatorDefault, NULL, (__bridge CFDictionaryRef)attributes, &_pool) != kCVReturnSuccess) _pool = NULL;
+        _poolWidth = width; _poolHeight = height;
+    }
+    CVPixelBufferRef output = NULL;
+    if (_pool) CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, _pool, &output);
+    return output;
 }
 
 - (CVMetalTextureRef)textureFor:(CVPixelBufferRef)buffer {
@@ -61,10 +81,8 @@ static const int SPStaticTile = 16;
             CVPixelBufferGetWidth(buffer) != width || CVPixelBufferGetHeight(buffer) != height) return NULL;
     }
     if (width == 0 || height == 0) return NULL;
-    CVPixelBufferRef output = NULL;
-    NSDictionary *attributes = @{(id)kCVPixelBufferIOSurfacePropertiesKey: @{}, (id)kCVPixelBufferMetalCompatibilityKey: @YES};
-    if (CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
-                            (__bridge CFDictionaryRef)attributes, &output) != kCVReturnSuccess || !output) return NULL;
+    CVPixelBufferRef output = [self createOutputWidth:width height:height];
+    if (!output) return NULL;
     CVMetalTextureRef refs[4] = {[self textureFor:previous], [self textureFor:current], [self textureFor:generated], [self textureFor:output]};
     BOOL ready = YES;
     for (CVMetalTextureRef ref : refs) ready = ready && ref && CVMetalTextureGetTexture(ref);
